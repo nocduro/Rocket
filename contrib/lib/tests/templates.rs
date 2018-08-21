@@ -6,8 +6,7 @@ extern crate rocket_contrib;
 
 #[cfg(feature = "templates")]
 mod templates_tests {
-    use std::env;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use rocket::{Rocket, http::RawStr};
     use rocket::config::{Config, Environment};
@@ -22,8 +21,7 @@ mod templates_tests {
     }
 
     fn template_root() -> PathBuf {
-        let cwd = env::current_dir().expect("current working directory");
-        cwd.join("tests").join("templates")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("templates")
     }
 
     fn rocket() -> Rocket {
@@ -115,6 +113,56 @@ mod templates_tests {
 
             let response = client.get("/tera/test").dispatch();
             assert_eq!(response.status(), Status::NotFound);
+        }
+
+        #[test]
+        #[cfg(debug_assertions)]
+        fn test_template_reload() {
+            use std::fs::File;
+            use std::io::Write;
+            use std::thread;
+            use std::time::Duration;
+
+            use rocket::local::Client;
+
+            const RELOAD_TEMPLATE: &str = "hbs/reload";
+            const INITIAL_TEXT: &str = "initial";
+            const NEW_TEXT: &str = "reload";
+
+            fn write_file(path: &Path, text: &str) {
+                let mut file = File::create(path).expect("open file");
+                file.write_all(text.as_bytes()).expect("write file");
+                file.sync_all().expect("sync file");
+            }
+
+            // set up the template before initializing the Rocket instance so
+            // that it will be picked up in the initial loading of templates.
+            let reload_path = template_root().join("hbs").join("reload.txt.hbs");
+            write_file(&reload_path, INITIAL_TEXT);
+
+            // verify that the initial content is correct
+            let client = Client::new(rocket()).unwrap();
+            let initial_rendered = Template::show(client.rocket(), RELOAD_TEMPLATE, ());
+            assert_eq!(initial_rendered, Some(INITIAL_TEXT.into()));
+
+            // write a change to the file
+            write_file(&reload_path, NEW_TEXT);
+
+            for _ in 0..6 {
+                // dispatch any request to trigger a template reload
+                client.get("/").dispatch();
+
+                // if the new content is correct, we are done
+                let new_rendered = Template::show(client.rocket(), RELOAD_TEMPLATE, ());
+                if new_rendered == Some(NEW_TEXT.into()) {
+                    return;
+                }
+
+                // otherwise, retry a few times, waiting 250ms in between
+                thread::sleep(Duration::from_millis(250));
+            }
+
+            panic!("failed to reload modified template in 1.5s");
         }
     }
 }

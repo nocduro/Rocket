@@ -286,7 +286,7 @@ impl Rocket {
             request.set_route(route);
 
             // Dispatch the request to the handler.
-            let outcome = (route.handler)(request, data);
+            let outcome = route.handler.handle(request, data);
 
             // Check if the request processing completed or if the request needs
             // to be forwarded. If it does, continue the loop to try again.
@@ -427,7 +427,7 @@ impl Rocket {
         }
 
         Rocket {
-            config: config,
+            config,
             router: Router::new(),
             default_catchers: catcher::defaults::get(),
             catchers: catcher::defaults::get(),
@@ -482,7 +482,7 @@ impl Rocket {
     /// use rocket::handler::Outcome;
     /// use rocket::http::Method::*;
     ///
-    /// fn hi(req: &Request, _: Data) -> Outcome<'static> {
+    /// fn hi<'r>(req: &'r Request, _: Data) -> Outcome<'r> {
     ///     Outcome::from(req, "Hello!")
     /// }
     ///
@@ -492,7 +492,7 @@ impl Rocket {
     /// # }
     /// ```
     #[inline]
-    pub fn mount(mut self, base: &str, routes: Vec<Route>) -> Self {
+    pub fn mount<R: Into<Vec<Route>>>(mut self, base: &str, routes: R) -> Self {
         info!("{}{} '{}':",
               Paint::masked("🛰  "),
               Paint::purple("Mounting"),
@@ -520,7 +520,7 @@ impl Rocket {
             panic!("Invalid mount point.");
         }
 
-        for mut route in routes {
+        for mut route in routes.into() {
             let complete_uri = format!("{}/{}", base_uri, route.uri);
             let uri = Origin::parse_route(&complete_uri)
                 .unwrap_or_else(|e| {
@@ -649,7 +649,9 @@ impl Rocket {
     /// fn main() {
     /// # if false { // We don't actually want to launch the server in an example.
     ///     rocket::ignite()
-    ///         .attach(AdHoc::on_launch(|_| println!("Rocket is launching!")))
+    ///         .attach(AdHoc::on_launch("Launch Message", |_| {
+    ///             println!("Rocket is launching!");
+    ///         }))
     ///         .launch();
     /// # }
     /// }
@@ -666,16 +668,17 @@ impl Rocket {
         self
     }
 
-    crate fn prelaunch_check(&self) -> Option<LaunchError> {
-        let collisions = self.router.collisions();
-        if !collisions.is_empty() {
-            let owned = collisions.iter().map(|&(a, b)| (a.clone(), b.clone()));
-            Some(LaunchError::new(LaunchErrorKind::Collision(owned.collect())))
-        } else if let Some(failures) = self.fairings.failures() {
-            Some(LaunchError::new(LaunchErrorKind::FailedFairings(failures.to_vec())))
-        } else {
-            None
+    crate fn prelaunch_check(mut self) -> Result<Rocket, LaunchError> {
+        self.router = match self.router.collisions() {
+            Ok(router) => router,
+            Err(e) => return Err(LaunchError::new(LaunchErrorKind::Collision(e)))
+        };
+
+        if let Some(failures) = self.fairings.failures() {
+            return Err(LaunchError::new(LaunchErrorKind::FailedFairings(failures.to_vec())))
         }
+
+        Ok(self)
     }
 
     /// Starts the application server and begins listening for and dispatching
@@ -699,9 +702,10 @@ impl Rocket {
     /// # }
     /// ```
     pub fn launch(mut self) -> LaunchError {
-        if let Some(error) = self.prelaunch_check() {
-            return error;
-        }
+        self = match self.prelaunch_check() {
+            Ok(rocket) => rocket,
+            Err(launch_error) => return launch_error
+        };
 
         self.fairings.pretty_print_counts();
 
@@ -819,7 +823,7 @@ impl Rocket {
     /// fn main() {
     /// # if false { // We don't actually want to launch the server in an example.
     ///     rocket::ignite()
-    ///         .attach(AdHoc::on_launch(|rocket| {
+    ///         .attach(AdHoc::on_launch("Config Printer", |rocket| {
     ///             println!("Rocket launch config: {:?}", rocket.config());
     ///         }))
     ///         .launch();

@@ -1,10 +1,10 @@
-#![feature(plugin, decl_macro, custom_derive)]
+#![feature(plugin, decl_macro)]
 #![plugin(rocket_codegen)]
 
 extern crate rocket;
 
 use std::path::PathBuf;
-use rocket::request::SegmentError;
+use rocket::http::uri::SegmentError;
 
 #[post("/<a>/<b..>")]
 fn get(a: String, b: PathBuf) -> String {

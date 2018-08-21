@@ -208,3 +208,14 @@ crate fn pop_max_level() {
 pub fn init(level: LoggingLevel) -> bool {
     try_init(level, true)
 }
+
+// This method exists as a shim for the log macros that need to be called from
+// an end user's code. It was added as part of the work to support database
+// connection pools via procedural macros.
+#[doc(hidden)]
+pub fn log_err(indented: bool, msg: &str) {
+    match indented {
+        true => error_!("{}", msg),
+        false => error!("{}", msg),
+    }
+}

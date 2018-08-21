@@ -56,9 +56,9 @@ impl<'f, T: FromForm<'f> + 'f> LenientForm<'f, T> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(plugin, decl_macro, custom_derive)]
+    /// # #![feature(plugin, decl_macro)]
     /// # #![plugin(rocket_codegen)]
-    /// # extern crate rocket;
+    /// # #[macro_use] extern crate rocket;
     /// use rocket::request::LenientForm;
     ///
     /// #[derive(FromForm)]
@@ -84,9 +84,9 @@ impl<'f, T: FromForm<'f> + 'f> LenientForm<'f, T> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(plugin, decl_macro, custom_derive)]
+    /// # #![feature(plugin, decl_macro)]
     /// # #![plugin(rocket_codegen)]
-    /// # extern crate rocket;
+    /// # #[macro_use] extern crate rocket;
     /// use rocket::request::LenientForm;
     ///
     /// #[derive(FromForm)]
@@ -114,9 +114,9 @@ impl<'f, T: FromForm<'f> + 'static> LenientForm<'f, T> {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(plugin, decl_macro, custom_derive)]
+    /// # #![feature(plugin, decl_macro)]
     /// # #![plugin(rocket_codegen)]
-    /// # extern crate rocket;
+    /// # #[macro_use] extern crate rocket;
     /// use rocket::request::LenientForm;
     ///
     /// #[derive(FromForm)]
@@ -161,6 +161,6 @@ impl<'f, T: FromForm<'f>> FromData for LenientForm<'f, T> where T::Error: Debug 
     /// logging format.
     #[inline]
     fn from_data(request: &Request, data: Data) -> data::Outcome<Self, Self::Error> {
-        super::from_data(request, data, false).map(|form| LenientForm(form))
+        super::from_data(request, data, false).map(LenientForm)
     }
 }

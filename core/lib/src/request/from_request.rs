@@ -181,21 +181,24 @@ impl<S, E> IntoOutcome<S, (Status, E), ()> for Result<S, E> {
 ///     key == "valid_api_key"
 /// }
 ///
+/// #[derive(Debug)]
+/// enum ApiKeyError {
+///     BadCount,
+///     Missing,
+///     Invalid,
+/// }
+///
 /// impl<'a, 'r> FromRequest<'a, 'r> for ApiKey {
-///     type Error = ();
+///     type Error = ApiKeyError;
 ///
-///     fn from_request(request: &'a Request<'r>) -> request::Outcome<ApiKey, ()> {
+///     fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
 ///         let keys: Vec<_> = request.headers().get("x-api-key").collect();
-///         if keys.len() != 1 {
-///             return Outcome::Failure((Status::BadRequest, ()));
+///         match keys.len() {
+///             0 => Outcome::Failure((Status::BadRequest, ApiKeyError::Missing)),
+///             1 if is_valid(keys[0]) => Outcome::Success(ApiKey(keys[0].to_string())),
+///             1 => Outcome::Failure((Status::BadRequest, ApiKeyError::Invalid)),
+///             _ => Outcome::Failure((Status::BadRequest, ApiKeyError::BadCount)),
 ///         }
-///
-///         let key = keys[0];
-///         if !is_valid(keys[0]) {
-///             return Outcome::Forward(());
-///         }
-///
-///         return Outcome::Success(ApiKey(key.to_string()));
 ///     }
 /// }
 ///
@@ -207,6 +210,141 @@ impl<S, E> IntoOutcome<S, (Status, E), ()> for Result<S, E> {
 ///
 /// # fn main() { }
 /// ```
+///
+/// # Request-Local State
+///
+/// Request guards that perform expensive operations, such as those that query a
+/// database or an external service, should use the [request-local state] cache
+/// to store results if they might be invoked multiple times during the routing
+/// of a single request.
+///
+/// For example, consider a pair of `User` and `Admin` guards and a pair of
+/// routes (`admin_dashboard` and `user_dashboard`):
+///
+/// ```rust
+/// # #![feature(plugin, decl_macro, never_type)]
+/// # #![plugin(rocket_codegen)]
+/// # extern crate rocket;
+/// #
+/// # use rocket::outcome::{IntoOutcome, Outcome};
+/// # use rocket::request::{self, FromRequest, Request};
+/// # struct User { id: String, is_admin: bool };
+/// # struct Database;
+/// # impl Database {
+/// #     fn get_user(&self, id: String) -> Result<User, ()> {
+/// #         Ok(User { id, is_admin: false })
+/// #     }
+/// # }
+/// # impl<'a, 'r> FromRequest<'a, 'r> for Database {
+/// #     type Error = ();
+/// #     fn from_request(request: &'a Request<'r>) -> request::Outcome<Database, ()> {
+/// #         Outcome::Success(Database)
+/// #     }
+/// # }
+/// #
+/// # struct Admin { user: User };
+/// #
+/// impl<'a, 'r> FromRequest<'a, 'r> for User {
+///     type Error = ();
+///
+///     fn from_request(request: &'a Request<'r>) -> request::Outcome<User, ()> {
+///         let db = request.guard::<Database>()?;
+///         request.cookies()
+///             .get_private("user_id")
+///             .and_then(|cookie| cookie.value().parse().ok())
+///             .and_then(|id| db.get_user(id).ok())
+///             .or_forward(())
+///     }
+/// }
+///
+/// impl<'a, 'r> FromRequest<'a, 'r> for Admin {
+///     type Error = ();
+///
+///     fn from_request(request: &'a Request<'r>) -> request::Outcome<Admin, ()> {
+///         // This will unconditionally query the database!
+///         let user = request.guard::<User>()?;
+///
+///         if user.is_admin {
+///             Outcome::Success(Admin { user })
+///         } else {
+///             Outcome::Forward(())
+///         }
+///     }
+/// }
+///
+/// #[get("/dashboard")]
+/// fn admin_dashboard(admin: Admin) { }
+///
+/// #[get("/dashboard", rank = 2)]
+/// fn user_dashboard(user: User) { }
+/// ```
+///
+/// When a non-admin user is logged in, the database will be queried twice: once
+/// via the `Admin` guard invoking the `User` guard, and a second time via the
+/// `User` guard directly. For cases like these, request-local state should be
+/// used, as illustrated below:
+///
+/// ```rust
+/// # #![feature(plugin, decl_macro, never_type)]
+/// # #![plugin(rocket_codegen)]
+/// # extern crate rocket;
+/// #
+/// # use rocket::outcome::{IntoOutcome, Outcome};
+/// # use rocket::request::{self, FromRequest, Request};
+/// # struct User { id: String, is_admin: bool };
+/// # struct Database;
+/// # impl Database {
+/// #     fn get_user(&self, id: String) -> Result<User, ()> {
+/// #         Ok(User { id, is_admin: false })
+/// #     }
+/// # }
+/// # impl<'a, 'r> FromRequest<'a, 'r> for Database {
+/// #     type Error = ();
+/// #     fn from_request(request: &'a Request<'r>) -> request::Outcome<Database, ()> {
+/// #         Outcome::Success(Database)
+/// #     }
+/// # }
+/// #
+/// # struct Admin<'a> { user: &'a User };
+/// #
+/// impl<'a, 'r> FromRequest<'a, 'r> for &'a User {
+///     type Error = !;
+///
+///     fn from_request(request: &'a Request<'r>) -> request::Outcome<&'a User, !> {
+///         // This closure will execute at most once per request, regardless of
+///         // the number of times the `User` guard is executed.
+///         let user_result = request.local_cache(|| {
+///             let db = request.guard::<Database>().succeeded()?;
+///             request.cookies()
+///                 .get_private("user_id")
+///                 .and_then(|cookie| cookie.value().parse().ok())
+///                 .and_then(|id| db.get_user(id).ok())
+///         });
+///
+///         user_result.as_ref().or_forward(())
+///     }
+/// }
+///
+/// impl<'a, 'r> FromRequest<'a, 'r> for Admin<'a> {
+///     type Error = !;
+///
+///     fn from_request(request: &'a Request<'r>) -> request::Outcome<Admin<'a>, !> {
+///         let user = request.guard::<&User>()?;
+///
+///         if user.is_admin {
+///             Outcome::Success(Admin { user })
+///         } else {
+///             Outcome::Forward(())
+///         }
+///     }
+/// }
+/// ```
+///
+/// Notice that these request guards provide access to *borrowed* data (`&'a
+/// User` and `Admin<'a>`) as the data is now owned by the request's cache.
+///
+/// [request-local state]: https://rocket.rs/guide/state/#request-local-state
+
 pub trait FromRequest<'a, 'r>: Sized {
     /// The associated error to be returned if derivation fails.
     type Error: Debug;
@@ -221,7 +359,7 @@ pub trait FromRequest<'a, 'r>: Sized {
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for Method {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         Success(request.method())
@@ -229,7 +367,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for Method {
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for &'a Origin<'a> {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         Success(request.uri())
@@ -237,7 +375,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for &'a Origin<'a> {
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for &'r Route {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         match request.route() {
@@ -248,7 +386,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for &'r Route {
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for Cookies<'a> {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         Success(request.cookies())
@@ -256,7 +394,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for Cookies<'a> {
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for &'a Accept {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         match request.accept() {
@@ -267,7 +405,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for &'a Accept {
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for &'a ContentType {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         match request.content_type() {
@@ -278,7 +416,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for &'a ContentType {
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for SocketAddr {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         match request.remote() {
@@ -289,7 +427,7 @@ impl<'a, 'r> FromRequest<'a, 'r> for SocketAddr {
 }
 
 impl<'a, 'r, T: FromRequest<'a, 'r>> FromRequest<'a, 'r> for Result<T, T::Error> {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         match T::from_request(request) {
@@ -301,7 +439,7 @@ impl<'a, 'r, T: FromRequest<'a, 'r>> FromRequest<'a, 'r> for Result<T, T::Error>
 }
 
 impl<'a, 'r, T: FromRequest<'a, 'r>> FromRequest<'a, 'r> for Option<T> {
-    type Error = ();
+    type Error = !;
 
     fn from_request(request: &'a Request<'r>) -> Outcome<Self, Self::Error> {
         match T::from_request(request) {
