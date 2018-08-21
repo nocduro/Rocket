@@ -48,7 +48,7 @@ fn new(id: usize) -> status::Accepted<String> {
 Similarly, the types in the [`content`
 module](https://api.rocket.rs/rocket/response/content/index.html) can be used to
 override the Content-Type of a response. For instance, to set the Content-Type
-an `&'static str` to JSON, you can use the [`content::Json`] type as follows:
+of `&'static str` to JSON, you can use the [`content::Json`] type as follows:
 
 ```rust
 use rocket::response::content;
@@ -125,7 +125,7 @@ fn handler() -> &'static str {
 
 ### `Option`
 
-`Option` is _wrapping_ responder: an `Option<T>` can only be returned when `T`
+`Option` is a _wrapping_ responder: an `Option<T>` can only be returned when `T`
 implements `Responder`. If the `Option` is `Some`, the wrapped responder is used
 to respond to the client. Otherwise, a error of **404 - Not Found** is returned
 to the client.
@@ -257,11 +257,16 @@ a template and a context to render the template with. The context can be any
 type that implements `Serialize` and serializes into an `Object` value, such as
 structs, `HashMaps`, and others.
 
-Rocket searches for a template with the given name in the configurable
+Rocket searches for a template with the given name in the [configurable]
 `template_dir` directory. Templating support in Rocket is engine agnostic. The
 engine used to render a template depends on the template file's extension. For
 example, if a file ends with `.hbs`, Handlebars is used, while if a file ends
 with `.tera`, Tera is used.
+
+When your application is compiled in `debug` mode (without the `--release` flag
+passed to `cargo`), templates are automatically reloaded when they are modified.
+This means that you don't need to rebuild your application to observe template
+changes: simply refresh! In release builds, reloading is disabled.
 
 For templates to be properly registered, the template fairing must be attached
 to the instance of Rocket. The [Fairings](/guide/fairings) sections of the guide
@@ -276,10 +281,11 @@ fn main() {
 }
 ```
 
-The [`Template`] API
-documentation contains more information about templates, while the [Handlebars
-Templates example on
+The [`Template`] API documentation contains more information about templates,
+including how to customize a template engine to add custom helpers and filters.
+The [Handlebars Templates example on
 GitHub](https://github.com/SergioBenitez/Rocket/tree/v0.4.0-dev/examples/handlebars_templates)
 is a fully composed application that makes use of Handlebars templates.
 
 [`Template`]: https://api.rocket.rs/rocket_contrib/struct.Template.html
+[configurable]: /guide/configuration/#extras

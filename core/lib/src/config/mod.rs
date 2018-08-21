@@ -185,7 +185,7 @@
 //!
 //! fn main() {
 //!     rocket::ignite()
-//!         .attach(AdHoc::on_attach(|rocket| {
+//!         .attach(AdHoc::on_attach("Token Config", |rocket| {
 //!             println!("Adding token managed state from config...");
 //!             let token_val = rocket.config().get_int("token").unwrap_or(-1);
 //!             Ok(rocket.manage(Token(token_val)))
@@ -262,10 +262,7 @@ impl RocketConfig {
         configs.insert(Production, Config::default(Production, &f).unwrap());
         configs.insert(active_env, config);
 
-        RocketConfig {
-            active_env: active_env,
-            config: configs
-        }
+        RocketConfig { active_env, config: configs }
     }
 
     /// Read the configuration from the `Rocket.toml` file. The file is search
@@ -480,8 +477,9 @@ crate fn init() -> Config {
     use self::ConfigError::*;
     let config = RocketConfig::read().unwrap_or_else(|e| {
         match e {
-            ParseError(..) | BadEntry(..) | BadEnv(..) | BadType(..) | Io(..)
-                | BadFilePath(..) | BadEnvVal(..) | UnknownKey(..) => bail(e),
+            | ParseError(..) | BadEntry(..) | BadEnv(..) | BadType(..) | Io(..)
+            | BadFilePath(..) | BadEnvVal(..) | UnknownKey(..)
+            | Missing(..) => bail(e),
             IoError | BadCWD => warn!("Failed reading Rocket.toml. Using defaults."),
             NotFound => { /* try using the default below */ }
         }
