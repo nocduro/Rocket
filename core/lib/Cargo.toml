@@ -5,7 +5,7 @@ authors = ["Sergio Benitez <sb@sergio.bz>"]
 description = """
 Web framework for nightly with a focus on ease-of-use, expressibility, and speed.
 """
-documentation = "https://api.rocket.rs/rocket/"
+documentation = "https://api.rocket.rs/0.4.0-dev/rocket/"
 homepage = "https://rocket.rs"
 repository = "https://github.com/SergioBenitez/Rocket"
 readme = "../../README.md"
@@ -22,19 +22,18 @@ rocket_codegen_next = { version = "0.4.0-dev", path = "../codegen_next" }
 rocket_http = { version = "0.4.0-dev", path = "../http" }
 yansi = "0.4"
 log = "0.4"
-toml = "0.4.2"
+toml = "0.4.7"
 num_cpus = "1.0"
 state = "0.4.1"
 time = "0.1"
 memchr = "2" # TODO: Use pear instead.
 base64 = "0.9"
-pear = { git = "http://github.com/SergioBenitez/Pear", rev = "b475140" }
+pear = { git = "http://github.com/SergioBenitez/Pear", rev = "d221e16dd" }
 isatty = "0.1"
 
 [dev-dependencies]
 # TODO: Find a way to not depend on this.
 lazy_static = "1.0"
-rocket_codegen = { version = "0.4.0-dev", path = "../codegen" }
 
 [build-dependencies]
 yansi = "0.4"

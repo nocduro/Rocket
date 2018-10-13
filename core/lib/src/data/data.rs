@@ -27,12 +27,16 @@ const PEEK_BYTES: usize = 512;
 ///
 /// This type is the only means by which the body of a request can be retrieved.
 /// This type is not usually used directly. Instead, types that implement
-/// [FromData](/rocket/data/trait.FromData.html) are used via code generation by
-/// specifying the `data = "<param>"` route parameter as follows:
+/// [`FromData`](::data::Data) are used via code generation by specifying the
+/// `data = "<var>"` route parameter as follows:
 ///
-/// ```rust,ignore
+/// ```rust
+/// # #![feature(proc_macro_hygiene, decl_macro)]
+/// # #[macro_use] extern crate rocket;
+/// # type DataGuard = ::rocket::data::Data;
 /// #[post("/submit", data = "<var>")]
-/// fn submit(var: T) -> ... { ... }
+/// fn submit(var: DataGuard) { /* ... */ }
+/// # fn main() { }
 /// ```
 ///
 /// Above, `T` can be any type that implements `FromData`. Note that `Data`
@@ -41,7 +45,7 @@ const PEEK_BYTES: usize = 512;
 /// # Reading Data
 ///
 /// Data may be read from a `Data` object by calling either the
-/// [open](#method.open) or [peek](#method.peek) methods.
+/// [`open()`](Data::open()) or [`peek()`](Data::peek()) methods.
 ///
 /// The `open` method consumes the `Data` object and returns the raw data
 /// stream. The `Data` object is consumed for safety reasons: consuming the

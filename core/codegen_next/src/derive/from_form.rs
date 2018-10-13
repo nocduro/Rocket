@@ -1,5 +1,5 @@
 use proc_macro::{Span, TokenStream};
-use derive_utils::{*, syn, ext::{TypeExt, Split3}};
+use derive_utils::{*, ext::{TypeExt, Split3}};
 
 #[derive(FromMeta)]
 struct Form {
@@ -23,13 +23,13 @@ fn is_valid_field_name(s: &str) -> bool {
 }
 
 impl FromMeta for FormField {
-    fn from_meta(meta: &syn::Meta) -> Result<Self> {
-        let string = <SpanWrapped<String>>::from_meta(meta)?;
-        if !is_valid_field_name(&string.value) {
-            return Err(string.value_span.error("invalid form field name"));
+    fn from_meta(meta: MetaItem) -> Result<Self> {
+        let string = String::from_meta(meta)?;
+        if !is_valid_field_name(&string) {
+            return Err(meta.value_span().error("invalid form field name"));
         }
 
-        Ok(FormField { span: string.value_span, name: string.value })
+        Ok(FormField { span: meta.value_span(), name: string })
     }
 }
 
@@ -58,7 +58,7 @@ fn validate_struct(gen: &DeriveGenerator, data: Struct) -> Result<()> {
 }
 
 pub fn derive_from_form(input: TokenStream) -> TokenStream {
-    let form_error = quote!(::rocket::request::FormError);
+    let form_error = quote!(::rocket::request::FormParseError);
     DeriveGenerator::build_for(input, "::rocket::request::FromForm<'__f>")
         .generic_support(GenericSupport::Lifetime | GenericSupport::Type)
         .replace_generic(0, 0)
@@ -72,7 +72,7 @@ pub fn derive_from_form(input: TokenStream) -> TokenStream {
         })
         .validate_struct(validate_struct)
         .function(|_, inner| quote! {
-            type Error = ::rocket::request::FormError<'__f>;
+            type Error = ::rocket::request::FormParseError<'__f>;
 
             fn from_form(
                 __items: &mut ::rocket::request::FormItems<'__f>,
@@ -112,7 +112,7 @@ pub fn derive_from_form(input: TokenStream) -> TokenStream {
             Ok(quote! {
                 #(#constructors)*
 
-                for (__k, __v) in __items {
+                for (__k, __v) in __items.map(|item| item.key_value()) {
                     match __k.as_str() {
                         #(#matchers)*
                         _ if __strict && __k != "_method" => {

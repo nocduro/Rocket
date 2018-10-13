@@ -95,13 +95,13 @@ pub struct Status {
 macro_rules! ctrs {
     ($($code:expr, $code_str:expr, $name:ident => $reason:expr),+) => {
         $(
-            #[doc="[Status](struct.Status.html) with code <b>"]
+            #[doc="[`Status`] with code <b>"]
             #[doc=$code_str]
             #[doc="</b> and reason <i>"]
             #[doc=$reason]
             #[doc="</i>."]
             #[allow(non_upper_case_globals)]
-            pub const $name: Status = Status::new($code, $reason);
+            pub const $name: Status = Status { code: $code, reason: $reason };
          )+
 
         /// Returns a Status given a standard status code `code`. If `code` is
@@ -134,7 +134,6 @@ macro_rules! ctrs {
                 _ => None
             }
         }
-
     };
 }
 
@@ -155,7 +154,7 @@ impl Status {
     /// assert_eq!(custom.to_string(), "299 Somewhat Successful".to_string());
     /// ```
     #[inline(always)]
-    pub const fn new(code: u16, reason: &'static str) -> Status {
+    pub fn new(code: u16, reason: &'static str) -> Status {
         Status { code, reason }
     }
 

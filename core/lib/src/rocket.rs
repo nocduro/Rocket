@@ -19,7 +19,7 @@ use response::{Body, Response};
 use router::{Router, Route};
 use catcher::{self, Catcher};
 use outcome::Outcome;
-use error::{Error, LaunchError, LaunchErrorKind};
+use error::{LaunchError, LaunchErrorKind};
 use fairing::{Fairing, Fairings};
 
 use http::{Method, Status, Header};
@@ -185,8 +185,8 @@ impl Rocket {
         if is_form && req.method() == Method::Post && data_len >= min_len {
             if let Ok(form) = from_utf8(&data.peek()[..min(data_len, max_len)]) {
                 let method: Option<Result<Method, _>> = FormItems::from(form)
-                    .filter(|&(key, _)| key.as_str() == "_method")
-                    .map(|(_, value)| value.parse())
+                    .filter(|item| item.key.as_str() == "_method")
+                    .map(|item| item.value.parse())
                     .next();
 
                 if let Some(Ok(method)) = method {
@@ -302,7 +302,7 @@ impl Rocket {
     }
 
     // Finds the error catcher for the status `status` and executes it for the
-    // given request `req`. If a user has registers a catcher for `status`, the
+    // given request `req`. If a user has registered a catcher for `status`, the
     // catcher is called. If the catcher fails to return a good response, the
     // 500 catcher is executed. If there is no registered catcher for `status`,
     // the default catcher is used.
@@ -320,22 +320,21 @@ impl Rocket {
         });
 
         // Dispatch to the user's catcher. If it fails, use the default 500.
-        let error = Error::NoRoute;
-        catcher.handle(error, req).unwrap_or_else(|err_status| {
+        catcher.handle(req).unwrap_or_else(|err_status| {
             error_!("Catcher failed with status: {}!", err_status);
             warn_!("Using default 500 error catcher.");
             let default = self.default_catchers.get(&500).expect("Default 500");
-            default.handle(error, req).expect("Default 500 response.")
+            default.handle(req).expect("Default 500 response.")
         })
     }
 
     /// Create a new `Rocket` application using the configuration information in
     /// `Rocket.toml`. If the file does not exist or if there is an I/O error
-    /// reading the file, the defaults are used. See the
-    /// [config](/rocket/config/index.html) documentation for more information
-    /// on defaults.
+    /// reading the file, the defaults are used. See the [`config`]
+    /// documentation for more information on defaults.
     ///
-    /// This method is typically called through the `rocket::ignite` alias.
+    /// This method is typically called through the
+    /// [`rocket::ignite()`](::ignite) alias.
     ///
     /// # Panics
     ///
@@ -456,9 +455,8 @@ impl Rocket {
     /// dispatched to the `hi` route.
     ///
     /// ```rust
-    /// # #![feature(plugin, decl_macro)]
-    /// # #![plugin(rocket_codegen)]
-    /// # extern crate rocket;
+    /// # #![feature(proc_macro_hygiene, decl_macro)]
+    /// # #[macro_use] extern crate rocket;
     /// #
     /// #[get("/world")]
     /// fn hi() -> &'static str {
@@ -498,11 +496,6 @@ impl Rocket {
               Paint::purple("Mounting"),
               Paint::blue(base));
 
-        if base.contains('<') || base.contains('>') {
-            error_!("Mount point '{}' contains dynamic paramters.", base);
-            panic!("Invalid mount point.");
-        }
-
         let base_uri = Origin::parse(base)
             .unwrap_or_else(|e| {
                 error_!("Invalid origin URI '{}' used as mount point.", base);
@@ -514,22 +507,12 @@ impl Rocket {
             panic!("Invalid mount point.");
         }
 
-        if !base_uri.is_normalized() {
-            error_!("Mount point '{}' is not normalized.", base_uri);
-            info_!("Expected: '{}'.", base_uri.to_normalized());
-            panic!("Invalid mount point.");
-        }
-
         for mut route in routes.into() {
-            let complete_uri = format!("{}/{}", base_uri, route.uri);
-            let uri = Origin::parse_route(&complete_uri)
-                .unwrap_or_else(|e| {
-                    error_!("Invalid route URI: {}", base);
-                    panic!("Error: {}", e)
-                });
-
-            route.set_base(base_uri.clone());
-            route.set_uri(uri.to_normalized());
+            let path = route.uri.clone();
+            if let Err(e) = route.set_uri(base_uri.clone(), path) {
+                error_!("{}", e);
+                panic!("Invalid route URI.");
+            }
 
             info_!("{}", route);
             self.router.add(route);
@@ -543,11 +526,8 @@ impl Rocket {
     /// # Examples
     ///
     /// ```rust
-    /// #![feature(plugin, decl_macro)]
-    /// #![plugin(rocket_codegen)]
-    ///
-    /// extern crate rocket;
-    ///
+    /// # #![feature(proc_macro_hygiene, decl_macro)]
+    /// # #[macro_use] extern crate rocket;
     /// use rocket::Request;
     ///
     /// #[catch(500)]
@@ -562,18 +542,18 @@ impl Rocket {
     ///
     /// fn main() {
     /// # if false { // We don't actually want to launch the server in an example.
-    ///     rocket::ignite().catch(catchers![internal_error, not_found])
+    ///     rocket::ignite()
+    ///         .register(catchers![internal_error, not_found])
     /// #       .launch();
     /// # }
     /// }
     /// ```
     #[inline]
-    pub fn catch(mut self, catchers: Vec<Catcher>) -> Self {
+    pub fn register(mut self, catchers: Vec<Catcher>) -> Self {
         info!("{}{}:", Paint::masked("👾  "), Paint::purple("Catchers"));
         for c in catchers {
-            if self.catchers.get(&c.code).map_or(false, |e| !e.is_default()) {
-                let msg = "(warning: duplicate catcher!)";
-                info_!("{} {}", c, Paint::yellow(msg));
+            if self.catchers.get(&c.code).map_or(false, |e| !e.is_default) {
+                info_!("{} {}", c, Paint::yellow("(warning: duplicate catcher!)"));
             } else {
                 info_!("{}", c);
             }
@@ -590,10 +570,9 @@ impl Rocket {
     /// refers to a different `T`.
     ///
     /// Managed state can be retrieved by any request handler via the
-    /// [State](/rocket/struct.State.html) request guard. In particular, if a
-    /// value of type `T` is managed by Rocket, adding `State<T>` to the list of
-    /// arguments in a request handler instructs Rocket to retrieve the managed
-    /// value.
+    /// [`State`](::State) request guard. In particular, if a value of type `T`
+    /// is managed by Rocket, adding `State<T>` to the list of arguments in a
+    /// request handler instructs Rocket to retrieve the managed value.
     ///
     /// # Panics
     ///
@@ -602,9 +581,8 @@ impl Rocket {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(plugin, decl_macro)]
-    /// # #![plugin(rocket_codegen)]
-    /// # extern crate rocket;
+    /// # #![feature(proc_macro_hygiene, decl_macro)]
+    /// # #[macro_use] extern crate rocket;
     /// use rocket::State;
     ///
     /// struct MyValue(usize);
@@ -640,9 +618,8 @@ impl Rocket {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(plugin, decl_macro)]
-    /// # #![plugin(rocket_codegen)]
-    /// # extern crate rocket;
+    /// # #![feature(proc_macro_hygiene, decl_macro)]
+    /// # #[macro_use] extern crate rocket;
     /// use rocket::Rocket;
     /// use rocket::fairing::AdHoc;
     ///
@@ -691,8 +668,6 @@ impl Rocket {
     /// returned. Note that a value of type `LaunchError` panics if dropped
     /// without first being inspected. See the [`LaunchError`] documentation for
     /// more information.
-    ///
-    /// [`LaunchError`]: /rocket/error/struct.LaunchError.html
     ///
     /// # Example
     ///
@@ -757,9 +732,8 @@ impl Rocket {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(plugin, decl_macro)]
-    /// # #![plugin(rocket_codegen)]
-    /// # extern crate rocket;
+    /// # #![feature(proc_macro_hygiene, decl_macro)]
+    /// # #[macro_use] extern crate rocket;
     /// use rocket::Rocket;
     /// use rocket::fairing::AdHoc;
     ///
@@ -814,9 +788,8 @@ impl Rocket {
     /// # Example
     ///
     /// ```rust
-    /// # #![feature(plugin, decl_macro)]
-    /// # #![plugin(rocket_codegen)]
-    /// # extern crate rocket;
+    /// # #![feature(proc_macro_hygiene, decl_macro)]
+    /// # #[macro_use] extern crate rocket;
     /// use rocket::Rocket;
     /// use rocket::fairing::AdHoc;
     ///
